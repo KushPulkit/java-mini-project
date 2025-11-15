@@ -1,0 +1,5 @@
+Java|100
+Python|100
+Maths|100
+DBMS|100
+DECA|100
