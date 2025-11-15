@@ -86,6 +86,7 @@ public class MainUI {
             System.out.println("6. Manage Subjects");
             System.out.println("7. View Student Result");
             System.out.println("8. Subject-wise Analysis");
+            System.out.println("9. Update Graduation Details");
             System.out.println("0. Logout");
             System.out.print("Choice: ");
             int ch = readIntSafe();
@@ -99,6 +100,7 @@ public class MainUI {
                 case 6 -> manageSubjectsMenu();
                 case 7 -> viewStudentResultAdmin();
                 case 8 -> processor.displaySubjectAnalysis();
+                case 9 -> updateGraduationFlow();
                 case 0 -> back = true;
                 default -> System.out.println("Invalid choice.");
             }
@@ -134,9 +136,22 @@ public class MainUI {
         System.out.print("Enter Age: ");
         int age = readIntSafe();
 
-        Student s = new Student(id, name, age, processor.getSubjectCount());
-        boolean ok = processor.addStudent(s);
+        // ask if graduating student
+        System.out.print("Is this a graduating student? (y/n): ");
+        String isGrad = readLineTrim();
 
+        Student s;
+        if (isGrad.equalsIgnoreCase("y")) {
+            System.out.print("Enter transcript notes (or leave blank): ");
+            String transcript = readLineTrim();
+            System.out.print("Has the student graduated? (y/n): ");
+            boolean status = readLineTrim().equalsIgnoreCase("y");
+            s = new GraduatingStudent(id, name, age, processor.getSubjectCount(), transcript, status);
+        } else {
+            s = new Student(id, name, age, processor.getSubjectCount());
+        }
+
+        boolean ok = processor.addStudent(s);
         System.out.println(ok ? "Student added." : "Could not add student.");
     }
 
@@ -247,6 +262,39 @@ public class MainUI {
         String name = readLineTrim();
         boolean ok = processor.removeSubject(name);
         System.out.println(ok ? "Subject removed." : "No such subject.");
+    }
+
+    // -----------------------------------
+    // UPDATE GRADUATION INFO (ADMIN)
+    // -----------------------------------
+    private void updateGraduationFlow() {
+        System.out.println("\n-- Update Graduation Details --");
+        System.out.print("Enter Student ID: ");
+        int id = readIntSafe();
+
+        Student s = processor.getStudentById(id);
+        if (s == null) {
+            System.out.println("Student not found.");
+            return;
+        }
+
+        if (!(s instanceof GraduatingStudent)) {
+            System.out.println("This is NOT a graduating student. If you want to convert them, delete and re-add as graduating.");
+            return;
+        }
+
+        GraduatingStudent gs = (GraduatingStudent) s;
+        System.out.println("Current transcript: " + gs.getTranscript());
+        System.out.print("Enter new transcript (leave blank to keep): ");
+        String transcript = readLineTrim();
+        if (!transcript.isEmpty()) gs.setTranscript(transcript);
+
+        System.out.print("Has the student graduated? (y/n): ");
+        boolean status = readLineTrim().equalsIgnoreCase("y");
+        gs.setGraduationStatus(status);
+
+        boolean ok = processor.updateGraduationInfo(id, gs.getTranscript(), gs.isGraduationStatus());
+        System.out.println(ok ? "Graduation info updated." : "Failed to update graduation info.");
     }
 
     // -----------------------------------
