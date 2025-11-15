@@ -17,6 +17,11 @@ import java.util.*;
  *
  * Note: Subject-wise analysis treats each subject with its own maxMarks.
  * For pass/fail per-subject we use 40% of the subject's maxMarks as threshold.
+ *
+ * students.txt new format (backwards compatible):
+ * id|name|age|isGraduating|transcriptEscaped|graduationStatus|m1,m2,m3...
+ *
+ * transcriptEscaped replaces '|' with "&#124;" to avoid breaking the pipe-delimited format.
  */
 public class ResultProcessor {
 
@@ -218,6 +223,7 @@ public class ResultProcessor {
      * - Prints per-subject marks (or N/A)
      * - Prints TotalObtained / TotalMax and percentage
      * - Prints Grade and PASS/FAIL (grade computed using calculateGrade)
+     * - If GraduatingStudent, prints transcript and graduation status
      */
     public void displayStudentDetails(int id) {
         Student s = getStudentById(id);
@@ -253,6 +259,14 @@ public class ResultProcessor {
         s.setPassed(checkPass(s));
         System.out.println("Grade       : " + s.getGrade());
         System.out.println("Result      : " + (s.isPassed() ? "PASS" : "FAIL"));
+
+        // If graduating student, show extra details
+        if (s instanceof GraduatingStudent) {
+            GraduatingStudent gs = (GraduatingStudent) s;
+            System.out.println("\n--- Graduation Details ---");
+            System.out.println("Graduation Status: " + (gs.isGraduationStatus() ? "Graduated" : "Pending"));
+            System.out.println(gs.generateTranscript());
+        }
     }
 
     // ------------------ MARKS & GRADE LOGIC ------------------
@@ -283,6 +297,21 @@ public class ResultProcessor {
         String grade = calculateGrade(students[sidx], subjects);
         students[sidx].setGrade(grade);
         students[sidx].setPassed(checkPass(students[sidx]));
+        try { saveStudentsToFile(); } catch (IOException e) {}
+        return true;
+    }
+
+    /**
+     * updateGraduationInfo - update transcript and graduation status for a student (if GraduatingStudent)
+     */
+    public boolean updateGraduationInfo(int studentId, String transcript, boolean status) {
+        int idx = findStudentIndexById(studentId);
+        if (idx == -1) return false;
+        Student s = students[idx];
+        if (!(s instanceof GraduatingStudent)) return false;
+        GraduatingStudent gs = (GraduatingStudent) s;
+        gs.setTranscript(transcript);
+        gs.setGraduationStatus(status);
         try { saveStudentsToFile(); } catch (IOException e) {}
         return true;
     }
@@ -363,14 +392,40 @@ public class ResultProcessor {
     }
 
     /**
-     * students.txt format per line:
-     * id|name|age|m1,m2,m3...
+     * students.txt format per line (new):
+     * id|name|age|isGraduating|transcriptEscaped|graduationStatus|m1,m2,...
+     *
+     * For backward compatibility, if old format id|name|age|m1,m2,... is found,
+     * it will still be parsed as a non-graduating student.
      */
     public void saveStudentsToFile() throws IOException {
         try (BufferedWriter bw = new BufferedWriter(new FileWriter(STUDENTS_FILE))) {
             for (int i = 0; i < studentCount; i++) {
                 Student s = students[i];
-                bw.write(s.toFileString());
+                StringBuilder sb = new StringBuilder();
+                sb.append(s.getId()).append("|")
+                  .append(s.getName()).append("|")
+                  .append(s.getAge()).append("|");
+
+                if (s instanceof GraduatingStudent) {
+                    GraduatingStudent gs = (GraduatingStudent) s;
+                    String transcript = gs.getTranscript();
+                    String esc = (transcript == null) ? "" : transcript.replace("|", "&#124;");
+                    sb.append("true").append("|").append(esc).append("|").append(gs.isGraduationStatus()).append("|");
+                } else {
+                    // not graduating -> mark as false and empty fields to keep format consistent
+                    sb.append("false").append("|").append("").append("|").append("false").append("|");
+                }
+
+                // marks list (comma separated) — if marks array shorter/longer, handle gracefully
+                double[] marks = s.getMarks();
+                if (marks != null && marks.length > 0) {
+                    for (int m = 0; m < marks.length; m++) {
+                        sb.append((int)marks[m]);
+                        if (m < marks.length - 1) sb.append(",");
+                    }
+                }
+                bw.write(sb.toString());
                 bw.newLine();
             }
         }
@@ -383,17 +438,43 @@ public class ResultProcessor {
             studentCount = 0;
             String line;
             while ((line = br.readLine()) != null && studentCount < MAX_STUDENTS) {
-                // parse id|name|age|m1,m2,...
-                String[] parts = line.split("\\|");
+                // try to parse new format first: id|name|age|isGrad|transcriptEsc|gradStatus|m1,m2,...
+                String[] parts = line.split("\\|", 7); // limit to 7 so marks remain as last part
                 if (parts.length < 4) continue; // malformed, skip
+
                 try {
                     int id = Integer.parseInt(parts[0].trim());
                     String name = parts[1].trim();
                     int age = Integer.parseInt(parts[2].trim());
-                    String marksStr = parts[3].trim();
+
+                    boolean isGrad = false;
+                    String transcript = "";
+                    boolean gradStatus = false;
+                    String marksStr = "";
+
+                    if (parts.length >= 7) {
+                        // new format
+                        isGrad = parts[3].trim().equalsIgnoreCase("true");
+                        transcript = parts[4].replace("&#124;", "|");
+                        gradStatus = parts[5].trim().equalsIgnoreCase("true");
+                        marksStr = parts[6].trim();
+                    } else {
+                        // fallback to old format (id|name|age|m1,m2,...)
+                        isGrad = false;
+                        marksStr = parts[3].trim();
+                    }
+
                     double[] arr = Student.parseMarksString(marksStr, subjectCount);
-                    Student s = new Student(id, name, age, subjectCount);
-                    s.setMarksArray(arr);
+                    Student s;
+                    if (isGrad) {
+                        GraduatingStudent gs = new GraduatingStudent(id, name, age, subjectCount, transcript, gradStatus);
+                        gs.setMarksArray(arr);
+                        s = gs;
+                    } else {
+                        s = new Student(id, name, age, subjectCount);
+                        s.setMarksArray(arr);
+                    }
+
                     // compute grade/pass on load
                     s.setGrade(calculateGrade(s, subjects));
                     s.setPassed(checkPass(s));
